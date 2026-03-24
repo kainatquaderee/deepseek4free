@@ -296,7 +296,7 @@ class DeepSeekAPI:
                             'type': 'text',
                             'finish_reason': None
                         }
-                    elif data['p'] == 'response/thinking' and data['o'] == 'APPEND':
+                    elif data['p'] == 'response/thinking_content' and data['o'] == 'APPEND':
                         return {
                             'content': data['v'],
                             'type': 'thinking',
