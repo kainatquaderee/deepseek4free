@@ -268,7 +268,7 @@ class DeepSeekAPI:
         try:
             if chunk.startswith(b'data: '):
                 data = json.loads(chunk[6:])
-                
+
                 # Новый формат: {'v': 'текст'}
                 if 'v' in data and isinstance(data['v'], str):
                     return {
@@ -276,8 +276,8 @@ class DeepSeekAPI:
                         'type': 'text',
                         'finish_reason': None
                     }
-                
-                # Старый формат: {'choices': [...]}  
+
+                # Старый формат: {'choices': [...]}
                 elif 'choices' in data and data['choices']:
                     choice = data['choices'][0]
                     if 'delta' in choice:
@@ -287,13 +287,13 @@ class DeepSeekAPI:
                             'type': delta.get('type', ''),
                             'finish_reason': choice.get('finish_reason')
                         }
-                        
+
                 # Формат с параметрами ответа
                 elif 'p' in data and 'v' in data:
                     if data['p'] == 'response/content' and data['o'] == 'APPEND':
                         return {
                             'content': data['v'],
-                            'type': 'text',
+                            'type': 'content',
                             'finish_reason': None
                         }
                     elif data['p'] == 'response/thinking_content' and data['o'] == 'APPEND':
@@ -302,7 +302,7 @@ class DeepSeekAPI:
                             'type': 'thinking',
                             'finish_reason': None
                         }
-                        
+
         except json.JSONDecodeError:
             raise APIError("Invalid JSON in response chunk")
         except Exception as e:
