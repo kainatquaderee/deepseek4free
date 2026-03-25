@@ -192,7 +192,7 @@ class DeepSeekAPI:
             return f"Successfully deleted session: {chat_session_id}"
         except KeyError:
             raise APIError("Invalid session delete response format from server")
-        
+
 
     def chat_completion(self,
                     chat_session_id: str,
@@ -271,7 +271,6 @@ class DeepSeekAPI:
 
         except requests.exceptions.RequestException as e:
             raise NetworkError(f"Network error occurred during streaming: {str(e)}")
-
     def _parse_chunk(self, chunk: bytes) -> Optional[Dict[str, Any]]:
         """Parse a SSE chunk from the API response"""
         if not chunk:
@@ -281,39 +280,40 @@ class DeepSeekAPI:
             if chunk.startswith(b'data: '):
                 data = json.loads(chunk[6:])
 
-                # Новый формат: {'v': 'текст'}
-                if 'v' in data and isinstance(data['v'], str):
-                    return {
-                        'content': data['v'],
-                        'type': 'text',
-                        'finish_reason': None
-                    }
+                # 1) Chunks with both 'p' and 'v' – these carry structured info
+                if 'p' in data and 'v' in data:
+                    if data['p'] == 'response/content':
+                        return {
+                            'content': data['v'],
+                            'type': 'content',
+                            'finish_reason': None
+                        }
+                    elif data['p'] == 'response/thinking_content':
+                        return {
+                            'content': data['v'],
+                            'type': 'thinking',
+                            'finish_reason': None
+                        }
+                    # Ignore other 'p' values (e.g., 'response/thinking_elapsed_secs')
 
-                # Старый формат: {'choices': [...]}
+                # 2) Standard OpenAI‑style chunk
                 elif 'choices' in data and data['choices']:
                     choice = data['choices'][0]
                     if 'delta' in choice:
                         delta = choice['delta']
                         return {
                             'content': delta.get('content', ''),
-                            'type': delta.get('type', ''),
+                            'type': delta.get('type', 'text'),
                             'finish_reason': choice.get('finish_reason')
                         }
 
-                # Формат с параметрами ответа
-                elif 'p' in data and 'v' in data:
-                    if data['p'] == 'response/content' and data['o'] == 'APPEND':
-                        return {
-                            'content': data['v'],
-                            'type': 'content',
-                            'finish_reason': None
-                        }
-                    elif data['p'] == 'response/thinking_content' and data['o'] == 'APPEND':
-                        return {
-                            'content': data['v'],
-                            'type': 'thinking',
-                            'finish_reason': None
-                        }
+                # 3) Simple text chunk (only 'v')
+                elif 'v' in data and isinstance(data['v'], str):
+                    return {
+                        'content': data['v'],
+                        'type': 'text',
+                        'finish_reason': None
+                    }
 
         except json.JSONDecodeError:
             raise APIError("Invalid JSON in response chunk")
