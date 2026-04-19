@@ -1,5 +1,7 @@
-curl-cffi==0.8.1b9
+curl-cffi==0.11.3
 wasmtime
 numpy
 nodriver
 drissionpage
+mcp
+python-dotenv

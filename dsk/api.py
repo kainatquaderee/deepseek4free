@@ -2,12 +2,12 @@ from curl_cffi import requests
 from typing import Optional, Dict, Any, Generator, Literal
 import json
 from .pow import DeepSeekPOW
-import pkg_resources
 import sys
 from pathlib import Path
 import subprocess
 import time
-
+import curl_cffi
+from importlib.metadata import version as get_version, PackageNotFoundError
 
 ThinkingMode = Literal['detailed', 'simple', 'disabled']
 SearchMode = Literal['enabled', 'disabled']
@@ -18,6 +18,10 @@ class DeepSeekError(Exception):
 
 class AuthenticationError(DeepSeekError):
     """Raised when authentication fails"""
+    pass
+
+class UploadFilesUnavailable(DeepSeekError):
+    """Raised when search enabled"""
     pass
 
 class RateLimitError(DeepSeekError):
@@ -46,26 +50,39 @@ class DeepSeekAPI:
             raise AuthenticationError("Invalid auth token provided")
 
         try:
-            curl_cffi_version = pkg_resources.get_distribution('curl-cffi').version
-            if curl_cffi_version != '0.8.1b9':
-                print("\033[93mWarning: DeepSeek API requires curl-cffi version 0.8.1b9", file=sys.stderr)
-                print("Please install the correct version using: pip install curl-cffi==0.8.1b9\033[0m", file=sys.stderr)
-        except pkg_resources.DistributionNotFound:
-            print("\033[93mWarning: curl-cffi not found. Please install version 0.8.1b9:", file=sys.stderr)
-            print("pip install curl-cffi==0.8.1b9\033[0m", file=sys.stderr)
+            curl_cffi_version = get_version('curl-cffi')
+            if curl_cffi_version != '0.11.3':
+                print("\033[93mWarning: DeepSeek API requires curl-cffi version 0.11.3", file=sys.stderr)
+                print("Please install the correct version using: pip install curl-cffi==0.11.3\033[0m", file=sys.stderr)
+        except PackageNotFoundError:
+            print("\033[93mWarning: curl-cffi not found. Please install version 0.11.3:", file=sys.stderr)
+            print("pip install curl-cffi==0.11.3\033[0m", file=sys.stderr)
 
         self.auth_token = auth_token
         self.pow_solver = DeepSeekPOW()
 
         # Load cookies from JSON file
         cookies_path = Path(__file__).parent / 'cookies.json'
+
+        if not cookies_path.is_file():
+            # Create empty cookies file with valid JSON structure
+            with open(cookies_path, "w", encoding='utf8') as f:
+                json.dump({"cookies": {}}, f, indent=2)
+
         try:
             with open(cookies_path, 'r') as f:
                 cookie_data = json.load(f)
                 self.cookies = cookie_data.get('cookies', {})
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"\033[93mWarning: Could not load cookies from {cookies_path}: {e}\033[0m", file=sys.stderr)
+            # Initialize with empty cookies dict on error
             self.cookies = {}
+            # Try to fix the corrupted cookies file
+            try:
+                with open(cookies_path, "w", encoding='utf8') as f:
+                    json.dump({"cookies": {}}, f, indent=2)
+            except:
+                pass
 
     def _get_headers(self, pow_response: Optional[str] = None) -> Dict[str, str]:
         headers = {
@@ -108,7 +125,7 @@ class DeepSeekAPI:
         except Exception as e:
             print(f"\033[93mWarning: Failed to refresh cookies: {e}\033[0m", file=sys.stderr)
 
-    def _make_request(self, method: str, endpoint: str, json_data: Dict[str, Any], pow_required: bool = False) -> Any:
+    def _make_request(self, method: str, endpoint: str, json_data: Dict[str, Any] = None, pow_required: bool = False) -> Any:
         url = f"{self.BASE_URL}{endpoint}"
 
         retry_count = 0
@@ -152,7 +169,7 @@ class DeepSeekAPI:
 
                 return response.json()
 
-            except requests.exceptions.RequestException as e:
+            except (requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
                 raise NetworkError(f"Network error occurred: {str(e)}")
             except json.JSONDecodeError:
                 raise APIError("Invalid JSON response from server")
@@ -181,6 +198,7 @@ class DeepSeekAPI:
             return response['data']['biz_data']['id']
         except KeyError:
             raise APIError("Invalid session creation response format from server")
+        
     def delete_chat_session(self, chat_session_id: str) -> None:
         """Delete currect chat session"""
         try:
@@ -192,11 +210,114 @@ class DeepSeekAPI:
             return f"Successfully deleted session: {chat_session_id}"
         except KeyError:
             raise APIError("Invalid session delete response format from server")
+        
+        
+    
+    def _make_request_upload_file(self, method: str, endpoint: str, file_path:str) -> Any:
+        url = f"{self.BASE_URL}{endpoint}"
+
+        retry_count = 0
+        max_retries = 2
+
+        while retry_count < max_retries:
+            try:
+                def _get_headers(pow_response: Optional[str] = None) -> Dict[str, str]:
+                    headers = {
+                        'accept': '*/*',
+                        'accept-language': 'en,fr-FR;q=0.9,fr;q=0.8,es-ES;q=0.7,es;q=0.6,en-US;q=0.5,am;q=0.4,de;q=0.3',
+                        'authorization': f'Bearer {self.auth_token}',
+                        'content-type': 'multipart/form-data',
+                        'origin': 'https://chat.deepseek.com',
+                        'referer': 'https://chat.deepseek.com/',
+                        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+                        'x-app-version': '20241129.1',
+                        'x-client-locale': 'en_US',
+                        'x-client-platform': 'web',
+                        'x-client-version': '1.0.0-always',
+                    }
+
+                    if pow_response:
+                        headers['x-ds-pow-response'] = pow_response
+
+                    return headers
+                
+                def _get_pow_challenge() -> Dict[str, Any]:
+                    try:
+                        response = self._make_request(
+                            'POST',
+                            '/chat/create_pow_challenge',
+                            {'target_path': '/api/v0/file/upload_file'}
+                        )
+                        return response['data']['biz_data']['challenge']
+                    except KeyError:
+                        raise APIError("Invalid challenge response format from server")
+
+                headers = _get_headers(self.pow_solver.solve_challenge(_get_pow_challenge()))
+
+                data = open(file_path, "rb").read()
+
+                mp = curl_cffi.CurlMime()
+                mp.addpart(
+                    name="text",
+                    content_type="text/plain",
+                    filename=f"{Path(file_path).name}",
+                    data=data,
+                )
+
+                response = requests.request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    multipart=mp,
+                    cookies=self.cookies,
+                    impersonate='chrome120',
+                    timeout=None
+                )
+
+                # Check if we hit Cloudflare protection
+                if "<!DOCTYPE html>" in response.text and "Just a moment" in response.text:
+                    print("\033[93mWarning: Cloudflare protection detected. Bypassing...\033[0m", file=sys.stderr)
+                    if retry_count < max_retries - 1:
+                        self._refresh_cookies()  # Refresh cookies
+                        retry_count += 1
+                        continue
+
+                # Handle other response codes
+                if response.status_code == 401:
+                    raise AuthenticationError("Invalid or expired authentication token")
+                elif response.status_code == 429:
+                    raise RateLimitError("API rate limit exceeded")
+                elif response.status_code >= 500:
+                    raise APIError(f"Server error occurred: {response.text}", response.status_code)
+                elif response.status_code != 200:
+                    raise APIError(f"API request failed: {response.text}", response.status_code)
+
+                return response.json()
+
+            except (requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
+                raise NetworkError(f"Network error occurred: {str(e)}")
+            except json.JSONDecodeError:
+                raise APIError("Invalid JSON response from server")
+
+        raise APIError("Failed to bypass Cloudflare protection after multiple attempts")
+    
+
+    def upload_file(self, file_path: str) -> str:
+        try:
+            response = self._make_request_upload_file(
+                'POST',
+                '/file/upload_file',
+                file_path=file_path
+            )
+            return response['data']['biz_data']['id']
+        except KeyError:
+            raise APIError('Invalid upload file response format from server')
 
 
     def chat_completion(self,
                     chat_session_id: str,
                     prompt: str,
+                    ref_file_ids: str = None,
                     parent_message_id: Optional[str] = None,
                     thinking_enabled: bool = True,
                     search_enabled: bool = False) -> Generator[Dict[str, Any], None, None]:
@@ -206,6 +327,7 @@ class DeepSeekAPI:
         Args:
             chat_session_id (str): The ID of the chat session
             prompt (str): The message to send
+            ref_file_ids (str): The ID of the file
             parent_message_id (Optional[str]): ID of the parent message for threading
             thinking_enabled (bool): Whether to show the thinking process
             search_enabled (bool): Whether to enable web search for up-to-date information
@@ -223,12 +345,15 @@ class DeepSeekAPI:
             raise ValueError("Prompt must be a non-empty string")
         if not chat_session_id or not isinstance(chat_session_id, str):
             raise ValueError("Chat session ID must be a non-empty string")
+        if ref_file_ids is not None and search_enabled:
+            raise UploadFilesUnavailable("To use file downloads, you need to turn off the search.")
+
 
         json_data = {
             'chat_session_id': chat_session_id,
             'parent_message_id': parent_message_id,
             'prompt': prompt,
-            'ref_file_ids': [],
+            'ref_file_ids': [] if ref_file_ids is None else [ref_file_ids],
             'thinking_enabled': thinking_enabled,
             'search_enabled': search_enabled,
         }
@@ -259,24 +384,66 @@ class DeepSeekAPI:
                 else:
                     raise APIError(f"API request failed: {error_text}", response.status_code)
 
+            # Track if we received finish event
+            finished = False
+            # Track message_id from the response
+            current_message_id = None
+            # Track if we've seen the first data chunk (for message_id extraction)
+            first_data_seen = False
+
             for chunk in response.iter_lines():
                 try:
+                    # Check for finish event
+                    if chunk.startswith(b'event: finish'):
+                        finished = True
+                        continue
+
                     parsed = self._parse_chunk(chunk)
                     if parsed:
+                        # Extract message_id from any chunk that contains it
+                        if current_message_id is None:
+                            if 'response_message_id' in parsed:
+                                current_message_id = parsed['response_message_id']
+                            elif 'message_id' in parsed:
+                                current_message_id = parsed['message_id']
+                        
+                        # Add message_id to all content chunks
+                        if current_message_id and parsed.get('type') in ('text', 'thinking'):
+                            parsed['message_id'] = current_message_id
+                        
                         yield parsed
-                        if parsed.get('finish_reason') == 'stop':
-                            break
                 except Exception as e:
                     raise APIError(f"Error parsing response chunk: {str(e)}")
+
+            # Exit loop after finish event
+            if finished:
+                return
 
         except requests.exceptions.RequestException as e:
             raise NetworkError(f"Network error occurred during streaming: {str(e)}")
     def _parse_chunk(self, chunk: bytes) -> Optional[Dict[str, Any]]:
-        """Parse a SSE chunk from the API response"""
+        """
+        Parse a SSE chunk from the API response.
+
+        DeepSeek uses Server-Sent Events (SSE) with different event types:
+        - event: ready - Initial event with message IDs
+        - event: update_session - Session metadata updates
+        - data: {"v": {...}} - Main response data with nested structure
+        - data: {"p": "...", "o": "...", "v": "..."} - Patch operations
+        - data: {"v": "..."} - Continuation of previous patch (same path)
+        - event: finish - Streaming completed
+        - event: title - Chat title
+        - event: close - Connection closed
+        """
         if not chunk:
             return None
 
         try:
+            # Handle event lines (they start with 'event:')
+            if chunk.startswith(b'event:'):
+                return None
+
+            # Parse data lines
             if chunk.startswith(b'data: '):
                 data = json.loads(chunk[6:])
 
@@ -316,8 +483,10 @@ class DeepSeekAPI:
                     }
 
         except json.JSONDecodeError:
-            raise APIError("Invalid JSON in response chunk")
+            # Skip invalid JSON chunks
+            pass
         except Exception as e:
-            raise APIError(f"Error parsing chunk: {str(e)}")
+            # Log error but don't raise - just skip the chunk
+            print(f"Warning: Error parsing chunk: {str(e)}", file=sys.stderr)
 
         return None

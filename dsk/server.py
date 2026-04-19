@@ -3,7 +3,7 @@ import re
 import os
 from urllib.parse import urlparse
 
-from CloudflareBypasser import CloudflareBypasser
+from .CloudflareBypasser import CloudflareBypasser
 from DrissionPage import ChromiumPage, ChromiumOptions
 from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel

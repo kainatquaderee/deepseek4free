@@ -2,31 +2,26 @@
 
 A Python package for interacting with the DeepSeek AI chat API. This package provides a clean interface to interact with DeepSeek's chat model, with support for streaming responses, thinking process visibility, and web search capabilities.
 
-### Learn how to reverse engineer private api's !!
-- and reverse wasm like it was required here
-- [whop.com/reverser-academy](https://whop.com/reverser-academy/) (beta)
+> [!NOTE]
+> If you encounter any errors, please ensure you are using the latest version of this library. The DeepSeek API may change frequently, and updates are released to maintain compatibility.
 
+## Features
 
-> ⚠️ **Service Notice**: DeepSeek API is currently experiencing high load. Work is in progress to integrate additional API providers. Please expect intermittent errors.
+- **Streaming Responses**: Real-time interaction with token-by-token output
+- **Thinking Process**: Optional visibility into the model's reasoning steps
+- **Web Search**: Optional integration for up-to-date information
+- **Session Management**: Persistent chat sessions with conversation history
+- **Efficient PoW**: WebAssembly-based proof of work implementation
+- **Error Handling**: Comprehensive error handling with specific exceptions
+- **No Timeouts**: Designed for long-running conversations without timeouts
+- **Thread Support**: Parent message tracking for threaded conversations
+- **MCP server**: You can use it with anything that supports it 
 
-> 📝 **Note**: If you encounter any errors, please ensure you are using the latest version of this library. The DeepSeek API may change frequently, and updates are released to maintain compatibility.
-
-## ✨ Features
-
-- 🔄 **Streaming Responses**: Real-time interaction with token-by-token output
-- 🤔 **Thinking Process**: Optional visibility into the model's reasoning steps
-- 🔍 **Web Search**: Optional integration for up-to-date information
-- 💬 **Session Management**: Persistent chat sessions with conversation history
-- ⚡ **Efficient PoW**: WebAssembly-based proof of work implementation
-- 🛡️ **Error Handling**: Comprehensive error handling with specific exceptions
-- ⏱️ **No Timeouts**: Designed for long-running conversations without timeouts
-- 🧵 **Thread Support**: Parent message tracking for threaded conversations
-
-## 📦 Installation
+## Installation
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/deepseek4free.git
+git clone https://github.com/kainatquaderee/deepseek4free.git
 cd deepseek4free
 ```
 
@@ -35,11 +30,11 @@ cd deepseek4free
 pip install -r requirements.txt
 ```
 
-## 🔑 Authentication
+## Authentication
 
 To use this package, you need a DeepSeek auth token. Here's how to obtain it:
 
-If you know how to use chrome devtools, simply run this snipped in the console:
+If you know how to use devtools, simply run this snippet in the console:
 
 ```js
 JSON.parse(localStorage.getItem("userToken")).value
@@ -109,6 +104,24 @@ prompt = "What is Python?"
 for chunk in api.chat_completion(chat_id, prompt):
     if chunk['type'] == 'text':
         print(chunk['content'], end='', flush=True)
+```
+
+#### Usage with qwen code
+
+```json
+{
+  "mcpServers": {
+    "deepseek-brain": {
+      "command": "/path/to/python/executable",
+      "args": [
+        "/path/to/run_server.py"
+      ],
+      "env": {
+        "DEEPSEEK_AUTH_TOKEN": "YOUR_AUTH_TOKEN"
+      }
+    }
+  }
+}
 ```
 
 ### Advanced Features
@@ -206,3 +219,4 @@ except NetworkError:
     print("Network error occurred. Check your internet connection.")
 except APIError as e:
     print(f"API error occurred: {str(e)}")
+```
